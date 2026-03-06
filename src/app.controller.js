@@ -9,17 +9,22 @@ const port = PORT
 
 
 const bootstrap = () => {
-    app.use(cors(),express.json())
+    app.use(cors(), express.json())
     checkConnection();
-
+    app.use("/uploads", express.static("uploads"))
     app.use("/users", userRouter)
 
     app.use("{/*demo}", (req, res) => {
-        throw new Error(`Url ${req.originalUrl} not found `,{cause:404})
+        throw new Error(`Url ${req.originalUrl} not found `, { cause: 404 })
     })
-app.use ((err, req, res, next) => {
-    res.status(err.cause||500).json({message: err.message, stack: err.stack})
-})
+    app.use(async(err, req, res, next) => {
+        if (req.uploadedImages?.length) {
+            for (const public_id of req.uploadedImages) {
+                await cloudinary.uploader.destroy(public_id);
+            }
+        }
+        res.status(err.cause || 500).json({ message: err.message, stack: err.stack })
+    })
 
     app.listen(port, () => console.log(`saraha app listening on port ${port}!`))
 }
