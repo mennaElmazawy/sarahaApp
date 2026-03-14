@@ -4,6 +4,7 @@ import userRouter from './modules/users/user.controller.js'
 import checkConnection from './DB/ConnectionDB.js'
 import cors from 'cors'
 import { PORT } from '../config/config.service.js'
+import { redisConnection } from './DB/redis/redis.db.js'
 const app = express()
 const port = PORT
 
@@ -11,6 +12,7 @@ const port = PORT
 const bootstrap = () => {
     app.use(cors(), express.json())
     checkConnection();
+    redisConnection();
     app.use("/uploads", express.static("uploads"))
     app.use("/users", userRouter)
 

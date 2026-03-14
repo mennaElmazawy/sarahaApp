@@ -26,21 +26,21 @@ const userSchema = new mongoose.Schema({
     },
     password: {
         type: String,
-        required: function(){
-            return this.provider ==providerEnum.google? false :true
+        required: function () {
+            return this.provider == providerEnum.google ? false : true
         },
         minLength: 6,
         trim: true
     },
- 
+
     phone: {
         type: String,
 
     },
-    role:{
-        type:String,
-        enum:Object.values(RoleEnum),
-        default:RoleEnum.admin
+    role: {
+        type: String,
+        enum: Object.values(RoleEnum),
+        default: RoleEnum.admin
     },
     age: Number,
     gender: {
@@ -48,14 +48,35 @@ const userSchema = new mongoose.Schema({
         enum: Object.values(genderEnum),
         default: genderEnum.male
     },
+    // profilePicture: {
+    //     secure_url: String,
+    //     public_id: String,
+    // },
     profilePicture: {
-        secure_url:String,
-        public_id: String, 
-     },
-    coverPicture:[{
-        secure_url: {type:String, required: true},
-        public_id: {type:String, required: true}
-     }],
+          path: {
+            type: String
+        }
+    },
+    // gallery: [{
+    //     secure_url: { type: String, required: true },
+    //     public_id: { type: String, required: true }
+    // }],
+    gallery: [{
+          path: {
+            type: String
+        }
+    }],
+    // coverPicture: [{
+    //     secure_url: String,
+    //     public_id: String
+    // }],
+    coverPicture: [{
+          path: {
+            type: String
+        }
+
+    }],
+    visitCount: { type: Number, default: 0 },
     confirmed: {
         type: Boolean,
         default: false
@@ -67,6 +88,7 @@ const userSchema = new mongoose.Schema({
         enum: Object.values(providerEnum),
         default: providerEnum.system
     },
+    // changeCredential: Date,
 
 }, {
     timestamps: true,

@@ -19,7 +19,7 @@ export const multer_local = ({ custom_path = "general", custom_types = [] } = {}
     })
     const fileFilter = (req, file, cb) => {
         if (!custom_types.includes(file.mimetype)) {
-            cb(new Error("invalid file type"))
+           return cb(new Error("invalid file type"))
         }
         cb(null, true)
     }
