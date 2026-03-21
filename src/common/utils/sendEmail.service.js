@@ -1,22 +1,32 @@
 import nodemailer from "nodemailer";
+import { EMAIL, PASSWORD, } from "../../../config/config.service.js";
 
 
 
 
-export const sendEmail = async (to, otp) => {
+export const sendEmail = async ({ to, subject, html, attachments = [] }) => {
   const transporter = nodemailer.createTransport({
     service: "gmail",
+    // tls: {
+    //   rejectUnauthorized: false,
+    // },
     auth: {
-      user: "menahossam50@gmail.com",       
-      pass: "frhdcfsutpvdgvfq",    
+      user: EMAIL,
+      pass: PASSWORD,
     },
   });
 
-  await transporter.sendMail({
-    from: "menahossam50@gmail.com",
+  const info = await transporter.sendMail({
+    from: EMAIL,
     to,
-    subject: "Saraha App OTP Verification",
-    text: `Your OTP is: ${otp}`,
+    subject: subject || "Saraha App OTP Verification",
+    html: html ,
+    attachments: attachments || []
   });
+  return info.accepted.length > 0 ? true : false;
 };
+
+export const generateOTP = async () => {
+  return Math.floor(Math.random() * 900000 + 100000);
+}
 

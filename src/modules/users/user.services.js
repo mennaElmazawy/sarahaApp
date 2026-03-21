@@ -9,7 +9,7 @@ import { Compare, Hash } from "../../common/utils/security/hash.security.js";
 import { v4 as uuidv4 } from 'uuid';
 import { GenerateToken, VerifyToken } from "../../common/utils/token.service.js";
 import otpGenerator from "otp-generator";
-import { sendEmail } from "../../common/utils/sendEmail.service.js";
+import { generateOTP, sendEmail } from "../../common/utils/sendEmail.service.js";
 import { OAuth2Client } from 'google-auth-library';
 
 import { PREFIX, REFRESH_SECRET_KEY, SALT_ROUNDS, SECRET_KEY } from "../../../config/config.service.js";
@@ -17,8 +17,59 @@ import cloudinary from "../../common/utils/cloudinary.js";
 import { model } from "mongoose";
 import { randomUUID } from "crypto";
 import revokeTokenModel from "../../DB/models/revokeToken.model.js";
-import { del, get, get_key, keys, revoked_key, setValue } from "../../DB/redis/redis.service.js";
+import { block_otp_key, block_password_key, del, expire, get, get_key, incr, keys, max_otp_key, max_password_key, otp_key, revoked_key, setValue, ttl } from "../../DB/redis/redis.service.js";
+import { emailEnum } from "../../common/enum/email.enum.js";
+import { eventEmitter } from "../../common/utils/email.events.js";
 
+export const sendEmailOtp = async ({ email, subject }) => {
+
+    const isblocked = await ttl(block_otp_key({ email, subject }))
+    if (isblocked > 0) {
+        throw new Error(`You are blocked from requesting OTP. Please try again after ${isblocked} seconds.`);
+    }
+    const otpTTL = await ttl(otp_key({ email, subject }))
+    if (otpTTL > 0) {
+        throw new Error(`Please wait ${otpTTL} seconds before requesting a new OTP`);
+    }
+
+    const maxTries = await get(max_otp_key({ email, subject }) || 0)
+    if (maxTries > 3) {
+        await setValue({ key: block_otp_key({ email, subject }), value: 1, ttl: 60 })
+        await del(max_otp_key({ email, subject }));
+        throw new Error("Maximum OTP resend attempts reached. Please try again later.");
+    }
+
+    const otp = await generateOTP();
+    eventEmitter.emit("confirmEmail", async () => {
+        await sendEmail({
+            to: email,
+            subject:subject|| "welcome to saraha app",
+            html: `<h1>Your OTP for email confirmation is: <b>${otp}</b></h1>`
+        });
+        await setValue({ key: otp_key({ email, subject }), value: Hash({ plainText: `${otp}` }), ttl: 60 })
+        await incr(max_otp_key({ email, subject }))
+
+    })
+
+
+
+};
+export const resendOTP = async (req, res) => {
+
+    const { email } = req.body;
+
+    const user = await db_service.findOne({
+        model: userModel,
+        filter: { email, confirmed: { $exists: false }, provider: providerEnum.system },
+    })
+    if (!user) {
+        throw new Error("User not found");
+    }
+    await sendEmailOtp({ email, subject: emailEnum.confirmEmail });
+    successResponse({ res, message: "OTP resent successfully" })
+
+
+};
 
 
 export const signUp = async (req, res, next) => {
@@ -30,12 +81,6 @@ export const signUp = async (req, res, next) => {
         throw new Error("email already exists", { cause: 400 })
     }
 
-    const otp = otpGenerator.generate(6, {
-        upperCaseAlphabets: false,
-        lowerCaseAlphabets: false,
-        specialChars: false,
-    });
-
     const user = await db_service.create({
         model: userModel,
         data: {
@@ -45,14 +90,11 @@ export const signUp = async (req, res, next) => {
             phone: encrypt(phone),
             age,
             gender,
-            confirmed: false,
-            otp,
-            otpExpires: new Date(Date.now() + 10 * 60 * 1000),
         }
     })
-    console.log("OTP:", otp);
+
     console.log("Sending email to:", email);
-    await sendEmail(email, otp);
+    await sendEmailOtp({ email, subject: emailEnum.confirmEmail });
     successResponse({ res, status: 201, message: "success sign up", data: user })
 
 }
@@ -123,7 +165,6 @@ export const signUp = async (req, res, next) => {
 
 // }
 
-
 export const signUpWithGmail = async (req, res, next) => {
 
     const { idToken } = req.body;
@@ -172,21 +213,65 @@ export const signUpWithGmail = async (req, res, next) => {
 }
 
 
+
+export const forgetPassword = async (req, res, next) => {
+    const { email } = req.body;
+    const user = await db_service.findOne({
+        model: userModel,
+        filter: { email, confirmed: { $exists: true }, provider: providerEnum.system }
+    })
+    if (!user) {
+        throw new Error("User not found", { cause: 404 });
+    }
+    await sendEmailOtp({ email, subject: emailEnum.forgetPassword });
+    successResponse({ res, message: "OTP sent successfully" })
+}
+
 export const signIn = async (req, res, next) => {
 
     const { email, password } = req.body;
     const user = await db_service.findOne({
         model: userModel,
-        filter: { email, provider: providerEnum.system }
+        filter: { email, provider: providerEnum.system, confirmed: { $exists: true } }
     })
     if (!user) {
         throw new Error("user not exist", { cause: 404 })
     }
+    const attemptsKey = max_password_key({ email });
+    const banKey = block_password_key({ email });
+    const isBlocked = await get(banKey);
+    if (isBlocked) {
+        throw new Error("Account is blocked. Please try again later.", { cause: 400 })
+    }
+
     if (!Compare({ plainText: password, cipherText: user.password })) {
+        const attempts = await incr(attemptsKey);
+        if (attempts >= 5) {
+            await setValue({ key: banKey, value: 1, ttl: 300 })
+            const ttlValue = await ttl(block_password_key({ email }));
+            console.log("TTL:", ttlValue);
+            console.log("Attempts:", attempts);
+
+            await del(attemptsKey)
+            throw new Error("Maximum password attempts reached. Please try again later.", { cause: 400 })
+        }
         throw new Error("invalid password", { cause: 400 })
     }
+    await del(attemptsKey)
     if (!user.confirmed) {
         return res.status(400).json({ message: "Please confirm your email first" });
+    }
+    if (user.twostepVerification) {
+
+        await sendEmailOtp({
+            email,
+            subject: emailEnum.login2FA
+        });
+
+        return successResponse({
+            res,
+            message: "OTP sent, please verify to complete login"
+        });
     }
     const jwtid = randomUUID();
     const access_token = GenerateToken({
@@ -210,7 +295,78 @@ export const signIn = async (req, res, next) => {
     })
     successResponse({ res, message: "login success", data: { access_token, Refresh_token } })
 
+
 }
+export const loginConfirmation = async (req, res, next) => {
+    const { email, otp } = req.body;
+    const user = await db_service.findOne({
+        model: userModel,
+        filter: { email }
+    });
+    if (!user) {
+        throw new Error("User not found", { cause: 404 });
+    }
+    const otpValue = await get(otp_key({ email, subject: emailEnum.login2FA }))
+    if (!otpValue) {
+        throw new Error("OTP expired ", { cause: 400 });
+    }
+    if (!Compare({ plainText: otp, cipherText: otpValue })) {
+        throw new Error("Invalid OTP", { cause: 400 });
+    }
+    const jwtid = randomUUID();
+    const access_token = GenerateToken({
+        payload: { id: user._id, email: user.email, role: user.role },
+        secret_key: SECRET_KEY,
+        options: {
+            expiresIn: "1h",
+            // issuer: "http://localhost:3000",
+            // audience: "http://localhost:4000",
+            // notBefore: 60 * 60,
+            jwtid
+        }
+    })
+    const Refresh_token = GenerateToken({
+        payload: { id: user._id, email: user.email, role: user.role },
+        secret_key: REFRESH_SECRET_KEY,
+        options: {
+            expiresIn: "1y",
+            jwtid
+        }
+    })
+    successResponse({ res, message: "login success", data: { access_token, Refresh_token } })
+
+
+}
+export const verifyForgetPassword = async (req, res, next) => {
+    const { email, otp, password } = req.body;
+
+    const otpValue = await get(otp_key({ email, subject: emailEnum.forgetPassword }))
+    if (!otpValue) {
+        throw new Error("OTP expired ");
+    }
+
+    if (!Compare({ plainText: otp, cipherText: otpValue })) {
+        throw new Error("Invalid OTP");
+    }
+    const user = await db_service.updateOne({
+        model: userModel,
+        filter: { email, confirmed: { $exists: true }, provider: providerEnum.system },
+        update: {
+            password: Hash({ plainText: password, salt_Rounds: SALT_ROUNDS }),
+            changeCredential: new Date()
+        }
+    })
+    if (!user.modifiedCount) {
+        throw new Error("User not found ", { cause: 404 })
+    }
+    await del(get_key({ userId: user._id }))
+    await del(otp_key({ email, subject: emailEnum.forgetPassword }))
+
+
+    successResponse({ res, message: "password reset successfully" })
+}
+
+
 
 export const getProfile = async (req, res, next) => {
     const key = `profile::${req.user._id}`
@@ -443,7 +599,60 @@ export const updatePassword = async (req, res, next) => {
     successResponse({ res, message: "done" })
 }
 
+export const enable2stepVerification = async (req, res, next) => {
+    const user = await userModel.findById(req.user._id);
+    if (user.twostepVerification) {
+        throw new Error("2-step verification is already enabled", { cause: 400 })
+    }
 
+    await sendEmailOtp({
+        email: user.email,
+        subject: emailEnum.enable2FA
+    });
+
+    successResponse({
+        res,
+        message: "OTP sent to enable 2-step verification. Please verify to complete the process."
+    });
+}
+
+export const toggle2sv = async (req, res, next) => {
+    const user = await db_service.findById({ model: userModel, id: req.user._id })
+    if (!user) {
+        throw new Error("user not exist", { cause: 404 })
+    }
+     await sendEmailOtp({
+        email: user.email,
+        subject:user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA
+    });
+
+    successResponse({
+        res,
+        message: "OTP sent. Please verify to complete the process."
+    });
+}
+export const verify2FAOTP = async (req, res, next) => {
+    const { otp } = req.body;
+    const user = await userModel.findById(req.user._id);
+    if (!user) {
+        throw new Error("User not found", { cause: 404 });
+    }
+    const otpValue = await get(otp_key({ email: user.email, subject: user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA }))
+    if (!otpValue) {
+        throw new Error("OTP expired ", { cause: 400 });
+    }
+    if (!Compare({ plainText: otp, cipherText: otpValue })) {
+        throw new Error("Invalid OTP");
+    }
+
+    user.twostepVerification = !user.twostepVerification;
+    await user.save();
+
+    await del(otp_key({ email: user.email, subject: user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA }));
+    await del(max_otp_key({ email: user.email, subject:user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA}));
+
+    successResponse({ res, message: "Done" });
+}
 export const logout = async (req, res, next) => {
     const { flag } = req.query
 

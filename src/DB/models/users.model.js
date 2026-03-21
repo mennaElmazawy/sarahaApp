@@ -77,18 +77,19 @@ const userSchema = new mongoose.Schema({
 
     }],
     visitCount: { type: Number, default: 0 },
-    confirmed: {
+    twostepVerification: {
         type: Boolean,
         default: false
     },
-    otp: String,
-    otpExpires: Date,
+    confirmed: Date,
+    // otp: String,
+    // otpExpires: Date,
     provider: {
         type: String,
         enum: Object.values(providerEnum),
         default: providerEnum.system
     },
-    // changeCredential: Date,
+     changeCredential: Date,
 
 }, {
     timestamps: true,

@@ -21,6 +21,18 @@ export const signUpSchema = {
 
 }
 
+export const confirmEmailSchema = {
+  body: joi.object({
+    email: general_rules.email.required(),
+    otp: joi.string().length(6).required()
+  }).required()
+}
+export const resendOTPSchema = {
+  body: joi.object({
+    email: general_rules.email.required(),
+  }).required()
+}
+
 
 export const profilePictureSchema = {
   file: joi
@@ -52,7 +64,7 @@ export const coverPictureSchema = {
       path: joi.string().required(),
     })
     .required()
-  ) .required()
+  ).required()
 }
 export const signInSchema = {
   body: joi.object({
@@ -83,6 +95,19 @@ export const updatedPasswordSchema = {
     oldPassword: general_rules.password.required(),
     newPassword: general_rules.password.required(),
     cnewPassword: joi.string().valid(joi.ref("newPassword")),
+  }).required()
+}
+export const verifyForgetPasswordSchema = {
+  body: confirmEmailSchema.body.append({
+    password: general_rules.password.required(),
+    cpassword: joi.string().valid(joi.ref("password")),
+  }).required()
+
+}
+
+export const verifyOTPSchema = {
+  body: joi.object({
+    otp: joi.string().length(6).required()
   }).required()
 }
 

@@ -4,7 +4,9 @@ import { REDIS_URL } from "../../../config/config.service.js";
 export const redisClient = createClient({
     url:REDIS_URL
 });
-
+redisClient.on("error", (err) => {
+    console.error("Redis Error:", err.message);
+});
 
 export const redisConnection = async () => {
     try {
