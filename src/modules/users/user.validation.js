@@ -27,7 +27,7 @@ export const confirmEmailSchema = {
     otp: joi.string().length(6).required()
   }).required()
 }
-export const resendOTPSchema = {
+export const resendEmailSchema = {
   body: joi.object({
     email: general_rules.email.required(),
   }).required()
@@ -70,9 +70,6 @@ export const signInSchema = {
   body: joi.object({
     email: general_rules.email.required(),
     password: general_rules.password.required(),
-  }).required(),
-  query: joi.object({
-    x: joi.number().min(10)
   }).required()
 }
 export const shareProfileSchema = {
@@ -99,6 +96,13 @@ export const updatedPasswordSchema = {
 }
 export const verifyForgetPasswordSchema = {
   body: confirmEmailSchema.body.append({
+    password: general_rules.password.required(),
+    cpassword: joi.string().valid(joi.ref("password")),
+  }).required()
+
+}
+export const resetPasswordByLinkSchema = {
+  body: joi.object({
     password: general_rules.password.required(),
     cpassword: joi.string().valid(joi.ref("password")),
   }).required()

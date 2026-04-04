@@ -29,10 +29,7 @@ export const multer_local = ({ custom_path = "general", custom_types = [] } = {}
 
 
 export const multer_host = (custom_types = [] ) => {
-
-    
     const storage = multer.diskStorage({
-       
     })
     const fileFilter = (req, file, cb) => {
         if (!custom_types.includes(file.mimetype)) {

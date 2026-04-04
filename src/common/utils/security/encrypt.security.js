@@ -1,9 +1,5 @@
 import crypto from 'crypto';
 
-
-
-
-
 const ENCRYPTION_KEY = Buffer.from("1234567890asdfghjkqwertyuiopzxcv");
 
 export function encrypt  (text) {

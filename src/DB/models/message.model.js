@@ -2,10 +2,10 @@ import mongoose from "mongoose";
 
 
 const messageSchema = new mongoose.Schema({
-    senderId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User"
-    },
+    // senderId: {
+    //     type: mongoose.Schema.Types.ObjectId,
+    //     ref: "User"
+    // },
     receiverId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
@@ -14,7 +14,6 @@ const messageSchema = new mongoose.Schema({
     content: {
         type: String,
         minLength: 2,
-        maxLength: 10000,
         required: function () {
             return !this.attachments?.length
         },
@@ -27,7 +26,8 @@ const messageSchema = new mongoose.Schema({
 },
     {
         timestamps: true,
-        collection: "Messages"
+        // collection: "Messages"
+        strictQuery: true,
     })
 
 export const MessageModel = mongoose.model.Message || mongoose.model("Message", messageSchema)

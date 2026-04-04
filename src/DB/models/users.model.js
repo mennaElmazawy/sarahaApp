@@ -48,48 +48,49 @@ const userSchema = new mongoose.Schema({
         enum: Object.values(genderEnum),
         default: genderEnum.male
     },
-    // profilePicture: {
-    //     secure_url: String,
-    //     public_id: String,
-    // },
     profilePicture: {
-          path: {
-            type: String
-        }
+        secure_url: String,
+        public_id: String,
     },
-    // gallery: [{
-    //     secure_url: { type: String, required: true },
-    //     public_id: { type: String, required: true }
-    // }],
+    // profilePicture: {
+    //       path: {
+    //         type: String
+    //     }
+    // },
     gallery: [{
-          path: {
+        secure_url: { type: String, required: true },
+        public_id: { type: String, required: true }
+    }],
+    gallery: [{
+        path: {
             type: String
         }
+    }],
+    coverPicture: [{
+        secure_url: String,
+        public_id: String
     }],
     // coverPicture: [{
-    //     secure_url: String,
-    //     public_id: String
-    // }],
-    coverPicture: [{
-          path: {
-            type: String
-        }
+    //       path: {
+    //         type: String
+    //     }
 
-    }],
+    // }],
     visitCount: { type: Number, default: 0 },
     twostepVerification: {
         type: Boolean,
         default: false
     },
     confirmed: Date,
-    // otp: String,
-    // otpExpires: Date,
+  
     provider: {
         type: String,
         enum: Object.values(providerEnum),
         default: providerEnum.system
     },
-     changeCredential: Date,
+    changeCredential: Date,
+    resetPasswordToken: String,
+    resetPasswordExpires: Date,
 
 }, {
     timestamps: true,

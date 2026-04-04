@@ -7,10 +7,7 @@ import { get, revoked_key } from "../../DB/redis/redis.service.js";
 import { VerifyToken } from "../utils/token.service.js";
 
 export const authentication = async (req, res, next) => {
-
-
     const { authorization } = req.headers;
-
     if (!authorization) {
         throw new Error("token not exist", { cause: 401 })
     }

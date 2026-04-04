@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { EMAIL, PASSWORD, } from "../../../config/config.service.js";
+import { EMAIL, PASSWORD, } from "../../../../config/config.service.js";
 
 
 

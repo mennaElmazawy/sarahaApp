@@ -11,7 +11,6 @@ cron.schedule('* * * * *', async () => {
             createdAt: { $lte: expireTime }
         });
 
-        console.log(`Deleted ${result.deletedCount} unconfirmed users`);
     } catch (error) {
         console.error("Cron job error:", error);
     }

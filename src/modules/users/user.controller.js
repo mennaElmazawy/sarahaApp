@@ -9,12 +9,13 @@ import { validation } from "../../common/middleware/validation.js";
 import { multer_host, multer_local } from "../../common/middleware/multer.js";
 import { multerEnum } from "../../common/enum/multer.enum.js";
 import { countProfileVisits } from "../../common/middleware/countProfileVisits.js";
+import messagesRouter from "../messages/messages.controller.js";
 
 
-const userRouter = Router();
+const userRouter = Router({caseSensitive: true ,strict: true });
 
 
-
+userRouter.use("/:userId/messages",messagesRouter)
 
 userRouter.post("/signup", validation(UV.signUpSchema), US.signUp)
 // userRouter.post("/signup",
@@ -43,17 +44,21 @@ userRouter.patch("/confirmEmail", validation(UV.confirmEmailSchema), confirmEmai
 userRouter.post("/enable2step", authentication, US.enable2stepVerification)
 userRouter.post("/toggle2step", authentication, US.toggle2sv)
 userRouter.post("/verify2FAOTP", authentication,validation(UV.verifyOTPSchema), US.verify2FAOTP)
-userRouter.post("/resendOTP", validation(UV.resendOTPSchema), US.resendOTP)
-userRouter.post("/forgetPassword", validation(UV.resendOTPSchema), US.forgetPassword)
+userRouter.post("/resendOTP", validation(UV.resendEmailSchema), US.resendOTP)
+userRouter.post("/forgetPassword", validation(UV.resendEmailSchema), US.forgetPassword)
 userRouter.patch("/resetForgetPassword", validation(UV.verifyForgetPasswordSchema), US.verifyForgetPassword)
+userRouter.post("/forgetPasswordByLink", validation(UV.resendEmailSchema), US.forgetPasswordByLink)
+userRouter.patch("/resetPasswordByLink", validation(UV.resetPasswordByLinkSchema), US.resetPasswordByLink)
 userRouter.post("/logout", authentication, US.logout)
-userRouter.patch("/updateProfilePicture", authentication,
-    multer_local({ custom_path: "users/profile", custom_types: [...multerEnum.image] }).single("profilePicture"), validation(UV.profilePictureSchema), US.updateProfilePicture)
 // userRouter.patch("/updateProfilePicture", authentication,
-//     multer_host(multerEnum.image).single("profilePicture"),validation(UV.profilePictureSchema), US.updateProfilePicture)
+//     multer_local({ custom_path: "users/profile", custom_types: [...multerEnum.image] }).single("profilePicture"), validation(UV.profilePictureSchema), US.updateProfilePicture)
+userRouter.patch("/updateProfilePicture", authentication,
+    multer_host(multerEnum.image).single("profilePicture"),validation(UV.profilePictureSchema), US.updateProfilePicture)
 userRouter.delete("/removeProfilePicture", authentication, US.removeProfilePicture);
+// userRouter.patch("/updateCoverPicture", authentication,
+//     multer_local({ custom_path: "users/cover", custom_types: [...multerEnum.image] }).array("coverPicture", 1), validation(UV.coverPictureSchema), US.updateCoverPicture)
 userRouter.patch("/updateCoverPicture", authentication,
-    multer_local({ custom_path: "users/cover", custom_types: [...multerEnum.image] }).array("coverPicture", 1), validation(UV.coverPictureSchema), US.updateCoverPicture)
+    multer_host(multerEnum.image).array("coverPicture", 1), validation(UV.coverPictureSchema), US.updateCoverPicture)
 
 
 

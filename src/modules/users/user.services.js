@@ -9,17 +9,17 @@ import { Compare, Hash } from "../../common/utils/security/hash.security.js";
 import { v4 as uuidv4 } from 'uuid';
 import { GenerateToken, VerifyToken } from "../../common/utils/token.service.js";
 import otpGenerator from "otp-generator";
-import { generateOTP, sendEmail } from "../../common/utils/sendEmail.service.js";
+import { generateOTP, sendEmail } from "../../common/utils/email/sendEmail.service.js";
 import { OAuth2Client } from 'google-auth-library';
 
-import { PREFIX, REFRESH_SECRET_KEY, SALT_ROUNDS, SECRET_KEY } from "../../../config/config.service.js";
+import { CLIENT_ID, PREFIX, REFRESH_SECRET_KEY, SALT_ROUNDS, SECRET_KEY } from "../../../config/config.service.js";
 import cloudinary from "../../common/utils/cloudinary.js";
-import { model } from "mongoose";
 import { randomUUID } from "crypto";
+import crypto from "crypto"
 import revokeTokenModel from "../../DB/models/revokeToken.model.js";
 import { block_otp_key, block_password_key, del, expire, get, get_key, incr, keys, max_otp_key, max_password_key, otp_key, revoked_key, setValue, ttl } from "../../DB/redis/redis.service.js";
 import { emailEnum } from "../../common/enum/email.enum.js";
-import { eventEmitter } from "../../common/utils/email.events.js";
+import { eventEmitter } from "../../common/utils/email/email.events.js";
 
 export const sendEmailOtp = async ({ email, subject }) => {
 
@@ -40,10 +40,10 @@ export const sendEmailOtp = async ({ email, subject }) => {
     }
 
     const otp = await generateOTP();
-    eventEmitter.emit("confirmEmail", async () => {
+    eventEmitter.emit(subject, async () => {
         await sendEmail({
             to: email,
-            subject:subject|| "welcome to saraha app",
+            subject: subject || "welcome to saraha app",
             html: `<h1>Your OTP for email confirmation is: <b>${otp}</b></h1>`
         });
         await setValue({ key: otp_key({ email, subject }), value: Hash({ plainText: `${otp}` }), ttl: 60 })
@@ -54,6 +54,7 @@ export const sendEmailOtp = async ({ email, subject }) => {
 
 
 };
+
 export const resendOTP = async (req, res) => {
 
     const { email } = req.body;
@@ -70,7 +71,6 @@ export const resendOTP = async (req, res) => {
 
 
 };
-
 
 export const signUp = async (req, res, next) => {
     const { userName, email, password, cpassword, phone, age, gender } = req.body;
@@ -92,12 +92,11 @@ export const signUp = async (req, res, next) => {
             gender,
         }
     })
-
-    console.log("Sending email to:", email);
     await sendEmailOtp({ email, subject: emailEnum.confirmEmail });
     successResponse({ res, status: 201, message: "success sign up", data: user })
 
 }
+
 // export const signUp = async (req, res, next) => {
 //     req.uploadedImages = [];
 
@@ -173,11 +172,10 @@ export const signUpWithGmail = async (req, res, next) => {
 
     const ticket = await client.verifyIdToken({
         idToken,
-        audience: "902153661363-7khm0nr0k7dqr8ksjp3j16rt7l6t65b2.apps.googleusercontent.com"
+        audience: CLIENT_ID
         ,
     });
     const payload = ticket.getPayload();
-    console.log(payload)
     const { email, email_verified, name, picture } = payload
 
     let user = await db_service.findOne({ model: userModel, filter: { email } })
@@ -208,11 +206,7 @@ export const signUpWithGmail = async (req, res, next) => {
     })
     successResponse({ res, message: "login success", data: { access_token } })
 
-
-
 }
-
-
 
 export const forgetPassword = async (req, res, next) => {
     const { email } = req.body;
@@ -227,12 +221,79 @@ export const forgetPassword = async (req, res, next) => {
     successResponse({ res, message: "OTP sent successfully" })
 }
 
+export const forgetPasswordByLink = async (req, res, next) => {
+    const { email } = req.body;
+    const user = await db_service.findOne({
+        model: userModel,
+        filter: { email, confirmed: { $exists: true }, provider: providerEnum.system }
+    })
+    if (!user) {
+        return successResponse({ res, message: "If this email exists, a reset link was sent" });
+    }
+    const resetToken = crypto.randomBytes(32).toString("hex");
+
+    const hashedToken = crypto
+        .createHash("sha256")
+        .update(resetToken)
+        .digest("hex");
+
+    user.resetPasswordToken = hashedToken;
+    user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+
+    await user.save();
+    const resetLink = `https://sarahaApp.com/reset-password?token=${resetToken}`;
+
+    eventEmitter.emit(emailEnum.forgetPassword, async () => {
+        await sendEmail({
+            to: email,
+            subject: "Password Reset Request",
+            html: `<h1>Click the link below to reset your password:</h1><a href="${resetLink}">${resetLink}</a>`
+        });
+    });
+   
+
+    successResponse({ res, message: "Link sent successfully" })
+}
+
+export const resetPasswordByLink = async (req, res, next) => {
+    const { token } = req.query;
+    const { password } = req.body;
+    const hashedToken = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+    const user = await db_service.findOne({
+        model: userModel,
+        filter: {
+            resetPasswordToken: hashedToken,
+            resetPasswordExpires: { $gt: Date.now() } 
+        }
+    });
+    if (!user) {
+        throw new Error("Invalid or expired link", { cause: 400 });
+
+    }
+    user.password = Hash({ plainText:password, salt_Rounds: SALT_ROUNDS });
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+
+    await user.save();
+
+    successResponse({ res, message: "Password reset successfully" });
+
+};
+
 export const signIn = async (req, res, next) => {
 
     const { email, password } = req.body;
     const user = await db_service.findOne({
         model: userModel,
-        filter: { email, provider: providerEnum.system, confirmed: { $exists: true } }
+        filter: {
+            email,
+            provider: providerEnum.system,
+            confirmed: { $exists: true }
+        }
     })
     if (!user) {
         throw new Error("user not exist", { cause: 404 })
@@ -249,9 +310,6 @@ export const signIn = async (req, res, next) => {
         if (attempts >= 5) {
             await setValue({ key: banKey, value: 1, ttl: 300 })
             const ttlValue = await ttl(block_password_key({ email }));
-            console.log("TTL:", ttlValue);
-            console.log("Attempts:", attempts);
-
             await del(attemptsKey)
             throw new Error("Maximum password attempts reached. Please try again later.", { cause: 400 })
         }
@@ -297,6 +355,7 @@ export const signIn = async (req, res, next) => {
 
 
 }
+
 export const loginConfirmation = async (req, res, next) => {
     const { email, otp } = req.body;
     const user = await db_service.findOne({
@@ -337,6 +396,7 @@ export const loginConfirmation = async (req, res, next) => {
 
 
 }
+
 export const verifyForgetPassword = async (req, res, next) => {
     const { email, otp, password } = req.body;
 
@@ -365,8 +425,6 @@ export const verifyForgetPassword = async (req, res, next) => {
 
     successResponse({ res, message: "password reset successfully" })
 }
-
-
 
 export const getProfile = async (req, res, next) => {
     const key = `profile::${req.user._id}`
@@ -427,7 +485,6 @@ export const shareProfile = async (req, res, next) => {
     successResponse({ res, message: "done", data: user })
 }
 
-
 export const updatedProfile = async (req, res, next) => {
     let { firstName, lastName, gender, phone } = req.body;
     if (phone) {
@@ -443,93 +500,36 @@ export const updatedProfile = async (req, res, next) => {
     }
 
     await del(`profile::${req.user._id}`)
-
-
     successResponse({ res, message: "done", data: user })
 }
 
 //update profilePicture locally without cloudinary
-export const updateProfilePicture = async (req, res, next) => {
-    console.log(req.file)
-    if (!req.file) {
-        throw new Error("profile picture is required", { cause: 400 })
-    }
-    const galleryFolder = path.resolve("uploads/users/gallery")
-
-    if (!fs.existsSync(galleryFolder)) {
-        fs.mkdirSync(galleryFolder, { recursive: true })
-    }
-    if (req.user.profilePicture?.path) {
-        const oldPath = req.user.profilePicture.path
-        if (fs.existsSync(oldPath)) {
-            const fileName = path.basename(oldPath)
-            const newGalleryPath = path.join(galleryFolder, fileName)
-            fs.renameSync(oldPath, newGalleryPath)
-            req.user.gallery.push({
-                path: newGalleryPath
-            })
-        }
-    }
-    req.user.profilePicture = { path: req.file.path }
-    await req.user.save();
-    successResponse({ res, message: "done", data: req.user })
-}
-
-//remove profile picture locally without cloudinary
-export const removeProfilePicture = async (req, res, next) => {
-    if (!req.user.profilePicture?.path) {
-        throw new Error("No profile picture to delete", { cause: 400 });
-    }
-    const filePath = req.user.profilePicture.path;
-    if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-    }
-    req.user.profilePicture = null;
-    await req.user.save();
-
-    successResponse({ res, message: "Profile picture removed successfully" });
-}
-
-
-//update profilePicture with cloudinary//
-
 // export const updateProfilePicture = async (req, res, next) => {
-//     console.log(req.file)
 //     if (!req.file) {
 //         throw new Error("profile picture is required", { cause: 400 })
 //     }
-//     const { secure_url, public_id } = await cloudinary.uploader.upload(
-//         req.file.path,
-//         { folder: `sarahaApp/users/profile` }
-//     );
-//     console.log(req.user.profilePicture)
-//     const oldImage = req.user.profilePicture;
-//     if (oldImage?.public_id) {
-//         const movedImage = await cloudinary.uploader.upload(
-//             oldImage.secure_url,
-//             {
-//                 folder: `sarahaApp/users/gallery`,
-//                 overwrite: true
-//             }
-//         );
-//         req.user.gallery.push({
-//             secure_url: movedImage.secure_url,
-//             public_id: movedImage.public_id
-//         });
-//         await cloudinary.uploader.destroy(oldImage.public_id)
+//     const galleryFolder = path.resolve("uploads/users/gallery")
+
+//     if (!fs.existsSync(galleryFolder)) {
+//         fs.mkdirSync(galleryFolder, { recursive: true })
 //     }
-//     req.user.profilePicture = { secure_url, public_id }
+//     if (req.user.profilePicture?.path) {
+//         const oldPath = req.user.profilePicture.path
+//         if (fs.existsSync(oldPath)) {
+//             const fileName = path.basename(oldPath)
+//             const newGalleryPath = path.join(galleryFolder, fileName)
+//             fs.renameSync(oldPath, newGalleryPath)
+//             req.user.gallery.push({
+//                 path: newGalleryPath
+//             })
+//         }
+//     }
+//     req.user.profilePicture = { path: req.file.path }
 //     await req.user.save();
-
-
-
-
 //     successResponse({ res, message: "done", data: req.user })
 // }
 
-
-// 3) Remove Profile Image API
-// Create an API to delete the user’s profile image from Hard Disk
+//remove profilePicture locally without cloudinary
 // export const removeProfilePicture = async (req, res, next) => {
 //     if (!req.user.profilePicture?.path) {
 //         throw new Error("No profile picture to delete", { cause: 400 });
@@ -544,56 +544,137 @@ export const removeProfilePicture = async (req, res, next) => {
 //     successResponse({ res, message: "Profile picture removed successfully" });
 // }
 
-// Remove Profile Image API with cloudinary
-// export const removeProfilePicture = async (req, res, next) => {
-//     if (!req.user.profilePicture?.public_id) {
-//         throw new Error("No profile picture to delete", { cause: 400 });
+
+//update profilePicture with cloudinary//
+
+export const updateProfilePicture = async (req, res, next) => {
+    let newImage = null;
+    let movedImage = null;
+    try {
+        if (!req.file) {
+            throw new Error("profile picture is required", { cause: 400 })
+        }
+        newImage = await cloudinary.uploader.upload(
+            req.file.path,
+            { folder: `sarahaApp/users/${req.user._id}/profile` }
+        );
+        const oldImage = req.user.profilePicture;
+        if (oldImage?.public_id) {
+            movedImage = await cloudinary.uploader.upload(
+                oldImage.secure_url,
+                {
+                    folder: `sarahaApp/users/${req.user._id}/gallery`,
+                    overwrite: true
+                }
+            );
+            req.user.gallery.push({
+                secure_url: movedImage.secure_url,
+                public_id: movedImage.public_id
+            });
+            await cloudinary.uploader.destroy(oldImage.public_id)
+        }
+        req.user.profilePicture = {
+            secure_url: newImage.secure_url,
+            public_id: newImage.public_id
+        }
+        await req.user.save();
+        successResponse({ res, message: "done", data: req.user })
+    } catch (error) {
+        if (newImage?.public_id) {
+            await cloudinary.uploader.destroy(newImage.public_id);
+        }
+
+        if (movedImage?.public_id) {
+            await cloudinary.uploader.destroy(movedImage.public_id);
+        }
+        throw new Error("Failed to update profile picture. Please try again.", { cause: 500 });
+
+    }
+}
+
+
+// Remove ProfilePicture with cloudinary
+export const removeProfilePicture = async (req, res, next) => {
+    if (!req.user.profilePicture?.public_id) {
+        throw new Error("No profile picture to delete", { cause: 400 });
+    }
+
+    await cloudinary.uploader.destroy(req.user.profilePicture.public_id);
+    req.user.profilePicture = null;
+    await req.user.save();
+
+
+    successResponse({ res, message: "Profile picture removed successfully" });
+}
+
+//update CoverPicture locally without cloudinary
+
+// export const updateCoverPicture = async (req, res, next) => {
+//     if (!req.files || req.files.length === 0) {
+//         throw new Error("At least one cover picture is required", { cause: 400 });
 //     }
 
-//     await cloudinary.uploader.destroy(req.user.profilePicture.public_id);
-//     req.user.profilePicture = null;
+//     const existingCount = req.user.coverPicture?.length || 0;
+//     if (existingCount + req.files.length > 2) {
+//         for (const file of req.files) {
+//             if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+//         }
+//         throw new Error(
+//             `You can only have 2 cover pictures. You already have ${existingCount}`,
+//             { cause: 400 }
+//         );
+//     }
+//     const uploadedImages = [];
+//     for (const file of req.files) {
+//         uploadedImages.push({ path: file.path });
+//     }
+//     req.user.coverPicture = [...(req.user.coverPicture || []), ...uploadedImages];
 //     await req.user.save();
-
-
-//     successResponse({ res, message: "Profile picture removed successfully" });
+//     successResponse({ res, message: "Cover pictures uploaded successfully", data: req.user });
 // }
 
+//update CoverPicture with cloudinary
 export const updateCoverPicture = async (req, res, next) => {
-    console.log(req.files)
+    let uploadedImages = [];
     if (!req.files || req.files.length === 0) {
         throw new Error("At least one cover picture is required", { cause: 400 });
     }
 
     const existingCount = req.user.coverPicture?.length || 0;
     if (existingCount + req.files.length > 2) {
-        for (const file of req.files) {
-            if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-        }
         throw new Error(
             `You can only have 2 cover pictures. You already have ${existingCount}`,
             { cause: 400 }
         );
     }
-    const uploadedImages = [];
     for (const file of req.files) {
-        uploadedImages.push({ path: file.path });
+        const { secure_url, public_id } = await cloudinary.uploader.upload(
+            file.path,
+            {
+                folder: `sarahaApp/users/${req.user._id}/cover`
+            }
+        );
+
+        uploadedImages.push({ secure_url, public_id });
+        req.uploadedImages = uploadedImages;
     }
     req.user.coverPicture = [...(req.user.coverPicture || []), ...uploadedImages];
     await req.user.save();
 
     successResponse({ res, message: "Cover pictures uploaded successfully", data: req.user });
-}
 
+}
 
 export const updatePassword = async (req, res, next) => {
     let { oldPassword, newPassword } = req.body;
     const user = await userModel.findById(req.user._id).select("+password")
-    console.log(req.user)
+
     if (!Compare({ plainText: oldPassword, cipherText: user.password })) {
         throw new Error("invalid old password", { cause: 400 })
     }
     const hash = Hash({ plainText: newPassword, salt_Rounds: SALT_ROUNDS })
     req.user.password = hash;
+    req.user.changeCredential = new Date()
     await req.user.save();
 
     successResponse({ res, message: "done" })
@@ -621,9 +702,9 @@ export const toggle2sv = async (req, res, next) => {
     if (!user) {
         throw new Error("user not exist", { cause: 404 })
     }
-     await sendEmailOtp({
+    await sendEmailOtp({
         email: user.email,
-        subject:user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA
+        subject: user.twostepVerification ? emailEnum.disable2FA : emailEnum.enable2FA
     });
 
     successResponse({
@@ -637,7 +718,7 @@ export const verify2FAOTP = async (req, res, next) => {
     if (!user) {
         throw new Error("User not found", { cause: 404 });
     }
-    const otpValue = await get(otp_key({ email: user.email, subject: user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA }))
+    const otpValue = await get(otp_key({ email: user.email, subject: user.twostepVerification ? emailEnum.disable2FA : emailEnum.enable2FA }))
     if (!otpValue) {
         throw new Error("OTP expired ", { cause: 400 });
     }
@@ -648,8 +729,8 @@ export const verify2FAOTP = async (req, res, next) => {
     user.twostepVerification = !user.twostepVerification;
     await user.save();
 
-    await del(otp_key({ email: user.email, subject: user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA }));
-    await del(max_otp_key({ email: user.email, subject:user.twostepVerification?emailEnum.disable2FA : emailEnum.enable2FA}));
+    await del(otp_key({ email: user.email, subject: user.twostepVerification ? emailEnum.disable2FA : emailEnum.enable2FA }));
+    await del(max_otp_key({ email: user.email, subject: user.twostepVerification ? emailEnum.disable2FA : emailEnum.enable2FA }));
 
     successResponse({ res, message: "Done" });
 }
